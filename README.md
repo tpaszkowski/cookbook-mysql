@@ -184,6 +184,21 @@ For more infromation on the compile vs execution phase of a Chef run:
 
 * http://wiki.opscode.com/display/chef/Anatomy+of+a+Chef+Run
 
+Galera Cluster
+--------------
+
+You can set up a multi-master MySQL Galera cluster using the `mysql::server_galera`
+recipe. Note that this recipe is not compatible with the `mysql::server`, and adding
+the former to the run_list of a node with the latter will remove all regular MySQL
+server packages from the node and install the custom MySQL-Galera packages.
+
+Add `recipe[mysql::server_galera]` to your node's run list. You will also need to
+set the values of the following node attributes:
+
+* `node['galera']['nodes']` should be a list of IP addresses or hostnames for
+   all machines in the cluster.
+* `node['wsrep']['cluster_name'] should be the common name of your cluster.
+
 Chef Solo Note
 ==============
 
