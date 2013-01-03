@@ -147,6 +147,7 @@ template "#{node['mysql']['conf_dir']}/my.cnf" do
   variables (
     "skip_federated" => skip_federated,
     "wsrep_urls" => cluster_urls
+  )
 end
 
 sst_receive_address = node['network']["ipaddress_#{node['wsrep']['sst_receive_interface']}"]
