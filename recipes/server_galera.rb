@@ -53,11 +53,6 @@ if node['galera']['nodes'].empty?
   Chef::Application.fatal(fail_msg)
 end
 
-if node['galera']['init_node'].nil?
-  fail_msg = "You must set node['galera']['init_node'] to the IP address or hostname of the initializor node in the cluster"
-  Chef::Application.fatal(fail_msg)
-end
-
 # Any MySQL server packages installed need to be removed, as
 # Galera is a specially-packaged MySQL server version that includes
 # the Galera WSREP plugin code compiled into the server.
@@ -112,7 +107,7 @@ end
 node.set['mysql']['tunable']['binlog_format'] = "ROW"
 node.set['mysql']['tunable']['innodb_autoinc_lock_mode'] = "2"
 node.set['mysql']['tunable']['innodb_locks_unsafe_for_binlog'] = "1"
-node.set['mysql']['tunable']['innodb_support_xa'] = "2"
+node.set['mysql']['tunable']['innodb_support_xa'] = "0"
 
 skip_federated = case node['platform']
                  when 'fedora', 'ubuntu', 'amazon'
