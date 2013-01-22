@@ -33,10 +33,10 @@ when 'centos', 'redhat', 'fedora', 'suse', 'scientific', 'amazon'
   default['wsrep']['provider'] = "/usr/lib64/galera/libgalera_smm.so"
 else
   default['galera']['support_packages'] = "libssl0.9.8 psmisc libaio1 wget rsync netcat"
-  default['galera']['packages']['galera']['i386'] = 'galera-23.2.2.i386.rpm'
-  default['galera']['packages']['galera']['x86_64'] = 'galera-23.2.2.amd64.rpm'
-  default['galera']['packages']['mysql_server']['i386'] = 'mysql-server-wsrep-5.5.28-23.7-1.i386.deb'
-  default['galera']['packages']['mysql_server']['x86_64'] = 'mysql-server-wsrep-5.5.28-23.7-1.amd64.deb'
+  default['galera']['packages']['galera']['i386'] = 'galera-23.2.2-i386.deb'
+  default['galera']['packages']['galera']['x86_64'] = 'galera-23.2.2-amd64.deb'
+  default['galera']['packages']['mysql_server']['i386'] = 'mysql-server-wsrep-5.5.28-23.7-i386.deb'
+  default['galera']['packages']['mysql_server']['x86_64'] = 'mysql-server-wsrep-5.5.28-23.7-amd64.deb'
   default['wsrep']['provider'] = "/usr/lib/galera/libgalera_smm.so"
 end
 
@@ -100,4 +100,4 @@ default['wsrep']['sst_receive_interface'] = 'eth0'
 
 # SST authentication string. This will be used to send SST to joining nodes.
 # Depends on SST method. For mysqldump method it is wsrep_sst:<wsrep password>
-default['wsrep']['sst_auth'] = default['wsrep']['user'] + ":" + default['wsrep']['password']
+default['wsrep']['sst_auth'] = "#{default['wsrep']['user']}:#{default['wsrep']['password']}"

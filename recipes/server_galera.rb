@@ -50,7 +50,7 @@ end
 
 if node['galera']['nodes'].empty?
   fail_msg = "You must set node['galera']['nodes'] to a list of IP addresses or hostnames for each node in your cluster"
-  Chef::Application.fatal(fail_msg)
+  Chef::Application.fatal!(fail_msg)
 end
 
 # Any MySQL server packages installed need to be removed, as
@@ -58,7 +58,15 @@ end
 # the Galera WSREP plugin code compiled into the server.
 node['mysql']['server']['packages'].each do |package_name|
   package package_name do
-    action :remove
+    action :purge
+  end
+end
+
+# Install all support packages first
+packages = node['galera']['support_packages'].split(" ")
+packages.each do | pack |
+  package pack do
+    action :upgrade
   end
 end
 
@@ -122,7 +130,7 @@ skip_federated = case node['platform']
 # to indicate to the first node that runs it to initialize a cluster.
 cluster_urls = ""
 node['galera']['nodes'].each do |address|
-  cluster_urls = "#{cluster_urls}gcomm://#{address}:#{port},"
+  cluster_urls = "#{cluster_urls}gcomm://#{address},"
 end
 cluster_urls = "#{cluster_urls}gcomm://"
 
@@ -139,7 +147,7 @@ template "#{node['mysql']['conf_dir']}/my.cnf" do
   else
     Chef::Log.info "my.cnf updated but mysql.reload_action is #{node['mysql']['reload_action']}. No action taken."
   end
-  variables (
+  variables(
     "skip_federated" => skip_federated,
     "wsrep_urls" => cluster_urls
   )
@@ -159,7 +167,7 @@ template "#{node['mysql']['confd_dir']}/wsrep.cnf" do
   else
     Chef::Log.info "wsrep.cnf updated but mysql.reload_action is #{node['mysql']['reload_action']}. No action taken."
   end
-  variables (
+  variables(
     "sst_receive_address" => sst_receive_address
   )
 end
@@ -176,7 +184,7 @@ service "mysql" do
     provider Chef::Provider::Service::Upstart
   end
   supports :status => true, :restart => true, :reload => true
-  action :enable, :start
+  action [ :enable, :start ]
 end
 
 # set the root password for situations that don't support pre-seeding.
