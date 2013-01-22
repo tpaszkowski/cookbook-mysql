@@ -117,14 +117,9 @@ node.set['mysql']['tunable']['innodb_autoinc_lock_mode'] = "2"
 node.set['mysql']['tunable']['innodb_locks_unsafe_for_binlog'] = "1"
 node.set['mysql']['tunable']['innodb_support_xa'] = "0"
 
-skip_federated = case node['platform']
-                 when 'fedora', 'ubuntu', 'amazon'
-                   true
-                 when 'centos', 'redhat', 'scientific'
-                   node['platform_version'].to_f < 6.0
-                 else
-                   false
-                 end
+# Doesn't look like the MySQL binaries from codership will start
+# with --skip-federated...
+skip_federated = false
 
 # The wsrep_urls is a collection of the cluster node URIs with gcomm:// at the end
 # to indicate to the first node that runs it to initialize a cluster.
