@@ -97,7 +97,3 @@ default['wsrep']['sst_method'] = "rsync"
 
 # Interface on this node to receive SST communication.
 default['wsrep']['sst_receive_interface'] = 'eth0'
-
-# SST authentication string. This will be used to send SST to joining nodes.
-# Depends on SST method. For mysqldump method it is wsrep_sst:<wsrep password>
-default['wsrep']['sst_auth'] = "#{default['wsrep']['user']}:#{default['wsrep']['password']}"
