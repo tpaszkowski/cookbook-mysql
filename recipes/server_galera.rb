@@ -40,6 +40,10 @@ else
   node.set_unless['mysql']['server_root_password']   = secure_password
   node.set_unless['mysql']['server_repl_password']   = secure_password
   node.set_unless['wsrep']['password']               = secure_password
+
+  # SST authentication string. This will be used to send SST to joining nodes.
+  # Depends on SST method. For mysqldump method it is wsrep_sst:<wsrep password>
+  node.set['wsrep']['sst_auth'] = "#{node['wsrep']['user']}:#{node['wsrep']['password']}"
   node.save
 end
 
@@ -117,14 +121,9 @@ node.set['mysql']['tunable']['innodb_autoinc_lock_mode'] = "2"
 node.set['mysql']['tunable']['innodb_locks_unsafe_for_binlog'] = "1"
 node.set['mysql']['tunable']['innodb_support_xa'] = "0"
 
-skip_federated = case node['platform']
-                 when 'fedora', 'ubuntu', 'amazon'
-                   true
-                 when 'centos', 'redhat', 'scientific'
-                   node['platform_version'].to_f < 6.0
-                 else
-                   false
-                 end
+# Doesn't look like the MySQL binaries from codership will start
+# with --skip-federated...
+skip_federated = false
 
 # The wsrep_urls is a collection of the cluster node URIs with gcomm:// at the end
 # to indicate to the first node that runs it to initialize a cluster.
@@ -133,6 +132,12 @@ node['galera']['nodes'].each do |address|
   cluster_urls = "#{cluster_urls}gcomm://#{address},"
 end
 cluster_urls = "#{cluster_urls}gcomm://"
+
+service "mysql" do
+  service_name node['mysql']['service_name']
+  supports :status => true, :restart => true, :reload => true
+  action :nothing
+end
 
 template "#{node['mysql']['conf_dir']}/my.cnf" do
   source "my.cnf.erb"
@@ -151,6 +156,7 @@ template "#{node['mysql']['conf_dir']}/my.cnf" do
     "skip_federated" => skip_federated,
     "wsrep_urls" => cluster_urls
   )
+  notifies :restart, "service[mysql]"
 end
 
 sst_receive_address = node['network']["ipaddress_#{node['wsrep']['sst_receive_interface']}"]
@@ -170,21 +176,13 @@ template "#{node['mysql']['confd_dir']}/wsrep.cnf" do
   variables(
     "sst_receive_address" => sst_receive_address
   )
+  notifies :restart, "service[mysql]"
 end
 
 execute 'mysql-install-db' do
   command "mysql_install_db"
   action :run
   not_if { File.exists?(node['mysql']['data_dir'] + '/mysql/user.frm') }
-end
-
-service "mysql" do
-  service_name node['mysql']['service_name']
-  if node['mysql']['use_upstart']
-    provider Chef::Provider::Service::Upstart
-  end
-  supports :status => true, :restart => true, :reload => true
-  action [ :enable, :start ]
 end
 
 # set the root password for situations that don't support pre-seeding.
@@ -207,4 +205,8 @@ execute "grant-wsrep-user" do
   sql_command = "SET wsrep_on=OFF; GRANT ALL ON *.* TO #{wsrep_user}@'%' IDENTIFIED BY '#{wsrep_pass}';"
   command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
   action :run
+end
+
+service "mysql" do
+  action :start
 end
