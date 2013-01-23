@@ -266,7 +266,3 @@ execute "grant-wsrep-user" do
   command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
   action :run
 end
-
-service "mysql" do
-  action :start
-end
