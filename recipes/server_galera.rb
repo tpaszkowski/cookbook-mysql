@@ -203,13 +203,13 @@ if is_reference_node
     # Need to set the cluster address to ourselves, but
     # eventually when the other nodes come online, can be
     # set to any of them...
-    wsrep_cluster_address = "gcomm://#{reference_address}:4567"
+    wsrep_cluster_address = "gcomm://#{reference_address}"
   end
 else
   # Need to wait until the reference node is done being
   # initialized and then attempt to connect to it.
   sleep 60
-  wsrep_cluster_address = "gcomm://#{reference_address}:4567"
+  wsrep_cluster_address = "gcomm://#{reference_address}"
 end
 
 template "#{node['mysql']['conf_dir']}/my.cnf" do
