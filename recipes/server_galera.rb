@@ -138,7 +138,7 @@ remote_file "#{Chef::Config[:file_cache_path]}/#{galera_package}" do
   action :create_if_missing
 end
 
-package "#{galera_package}" do
+dpkg_package "#{galera_package}" do
   source "#{Chef::Config[:file_cache_path]}/#{galera_package}"
 end
 
@@ -151,7 +151,7 @@ remote_file "#{Chef::Config[:file_cache_path]}/#{mysql_server_package}" do
   action :create_if_missing
 end
 
-package "#{mysql_server_package}" do
+dkpg_package "#{mysql_server_package}" do
   source "#{Chef::Config[:file_cache_path]}/#{mysql_server_package}"
 end
 
