@@ -79,7 +79,7 @@ else
       cluster_addresses << address
     end
 
-    ::Chef.Log.info "Searching for reference node having role '#{galera_reference_role}' in cluster '#{cluster_name}'"
+    ::Chef::Log.info "Searching for reference node having role '#{galera_reference_role}' in cluster '#{cluster_name}'"
     query = "role:#{galera_reference_role} AND wsrep_cluster_name:#{cluster_name}"
     results, _, _ = ::Chef::Search::Query.new.search :node, query
     if results.empty?
