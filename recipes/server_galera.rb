@@ -21,6 +21,17 @@
 
 include_recipe "mysql::client"
 
+class Chef::Resource::RubyBlock
+  def notme (n,a)
+    a.each do |c|
+      unless n.name==c.name
+        return c
+      end
+    end
+  end
+end
+
+
 if Chef::Config[:solo]
   missing_attrs = %w{
     server_debian_password server_root_password server_repl_password
@@ -59,8 +70,8 @@ else
   cluster_addresses = []
 
   ::Chef::Log.info "Searching for nodes having role '#{galera_role}' and cluster name '#{cluster_name}'"
-  query = "role:#{galera_role} AND wsrep_cluster_name:#{cluster_name}"
-  results, _, _ = ::Chef::Search::Query.new.search :node, query
+  #Shorter query format (alff), also reduce result count by chef_environment
+  results = search(:node, "role:#{galera_role} AND wsrep_cluster_name:#{cluster_name} AND chef_environment:#{node.chef_environment}")
 
   if results.empty?
     ::Chef::Application.fatal!("Searched for role #{galera_role} and cluster name #{cluster_name} found no nodes. Exiting.")
@@ -78,10 +89,9 @@ else
       ::Chef::Log.info "Adding #{address} to list of cluster addresses in cluster '#{cluster_name}'."
       cluster_addresses << address
     end
-
+    
     ::Chef::Log.info "Searching for reference node having role '#{galera_reference_role}' in cluster '#{cluster_name}'"
-    query = "role:#{galera_reference_role} AND wsrep_cluster_name:#{cluster_name}"
-    results, _, _ = ::Chef::Search::Query.new.search :node, query
+    results = search(:node, "role:#{galera_reference_role} AND wsrep_cluster_name:#{cluster_name} AND chef_environment:#{node.chef_environment}")
     if results.empty?
       ::Chef::Application.fatal!("Could not find node with reference role. Exiting.")
     elsif results.size != 1
@@ -170,6 +180,7 @@ end
 
 # The following variables in the my.cnf MUST BE set
 # this way for Galera to work properly.
+# alff note: All these attrs should be move in environment or at least in galera cookbook attrs
 node.set['mysql']['tunable']['binlog_format'] = "ROW"
 node.set['mysql']['tunable']['innodb_autoinc_lock_mode'] = "2"
 node.set['mysql']['tunable']['innodb_locks_unsafe_for_binlog'] = "1"
@@ -185,39 +196,12 @@ service "mysql" do
   action :nothing
 end
 
-# In order to initialize the Galera cluster, the first
-# node in the cluster (doesn't matter which one) needs
-# to be started like so:
-#
-#  $> mysqld_safe --wsrep_cluster_address=gcomm://
-#
-# And then shut down. This initializes the cluster. Afterwards,
-# the same server can be started up with --wsrep-cluster-address=gcomm://<NODE_IP>
-galera_cache_file = ::File.join node['mysql']['data_dir'], 'galera.cache'
-is_galera_initialized = ::FileTest.exists?(galera_cache_file)
-if is_reference_node
-  if not is_galera_initialized
-    # Special instruction to initialize the cluster...
-    wsrep_cluster_address = 'gcomm://'
-  else
-    # Need to set the cluster address to ourselves, but
-    # eventually when the other nodes come online, can be
-    # set to any of them...
-    wsrep_cluster_address = "gcomm://#{reference_address}"
-  end
-else
-  # Need to wait until the reference node is done being
-  # initialized and then attempt to connect to it.
-  sleep 60
-  wsrep_cluster_address = "gcomm://#{reference_address}"
-end
-
 template "#{node['mysql']['conf_dir']}/my.cnf" do
   source "my.cnf.erb"
   owner "root"
   group node['mysql']['root_group']
   mode 00644
-  notifies :restart, "service[mysql]"
+  notifies :restart, resources(:service => "mysql")
   variables(
     "skip_federated" => skip_federated
   )
@@ -229,7 +213,7 @@ template "#{node['mysql']['confd_dir']}/wsrep.cnf" do
   owner "root"
   group node['mysql']['root_group']
   mode 00644
-  notifies :restart, "service[mysql]", :immediately
+  notifies :restart, resources(:service => "mysql"), :immediately
   variables(
     "sst_receive_address" => sst_receive_address,
     "wsrep_cluster_address" => wsrep_cluster_address,
@@ -237,6 +221,85 @@ template "#{node['mysql']['confd_dir']}/wsrep.cnf" do
   )
 end
 
+====
+
+#First step create cluster
+if node.run_list.role_names.include?(galera_reference_role)
+  master = true
+else
+  master = false
+end
+
+#TODO: create much pretty method to call resources like a functions. alff
+unless node["galera"]["cluster_replicate_state"] == "ok"
+  if master
+    wsrep_cluster_address = "gcomm://"
+    script "create-cluster" do
+      user "root"
+      code <<-EOH
+      mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address}
+      echo $! > /var/run/cluster_init.pid
+      EOH
+    end
+
+    #ruby_block for check state "synced"
+
+    #ruby_block Set synced state
+
+
+    #Looking for others
+    #TODO: move timeout into attrs
+    ruby_block "search-slaves" do
+      block do
+        results.each do |result|
+          sttime=Time.now.to_f
+          until result.attribute?("galera")&&result["galera"].key?("cluster_replicate_state")&&result["galera"]["cluster_replicate_state"]=="ok" do
+            if (Time.now.to_f-sttime)>=300
+              Chef::Log.error "Timeout exceeded while node #{result.name} syncing.."
+              exit 1
+            else
+              Chef::Log.info "Waiting while node #{result.name} syncing.."
+              sleep 10
+              result = search(:node, "name:#{result["fqdn"]} AND chef_environment:#{node.chef_environment}")[0]
+            end
+          end
+        end
+      end
+    end
+
+    #block to stop mysql proccess by pid
+
+    #compose results except self own ip
+
+    #start mysql service !!!!
+
+  else
+    wsrep_cluster_address = "gcomm://#{reference_address}"
+
+#block waiting for master
+
+    #initial connect to the cluster
+    script "create-cluster" do
+      user "root"
+      code <<-EOH
+      mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address}
+      echo $! > /var/run/cluster_init.pid
+      EOH
+    end
+
+    #block check synced
+
+    #block set status synced
+
+    #block wait for master galera server start with final config
+    
+    #start mysql service !!!!
+
+
+  end
+end
+
+#FIXME: implenent next blocks into galera cluster set up
 execute 'mysql-install-db' do
   command "mysql_install_db"
   action :run
