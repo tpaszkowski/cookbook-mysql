@@ -62,7 +62,7 @@ else
   query = "roles:#{galera_role} AND wsrep_cluster_name:#{cluster_name}"
   results, _, _ = ::Chef::Search::Query.new.search :node, query
 
-  if resulst.empty?
+  if results.empty?
     ::Chef::Application.exit!("Searched for role #{galera_role} and cluster name #{cluster_name} found no nodes. Exiting.")
   elsif results.size < 3
     ::Chef::Application.exit!("You need at least three Galera nodes in the cluster. Found #{result.len}. Exiting.")
