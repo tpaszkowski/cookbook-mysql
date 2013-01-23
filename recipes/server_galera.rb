@@ -67,7 +67,7 @@ else
   elsif results.size < 3
     ::Chef::Application.fatal!("You need at least three Galera nodes in the cluster. Found #{results.size}. Exiting.")
   else
-    ::Chef::Log.info "Found #{result.size} nodes in cluster #{cluster_name}."
+    ::Chef::Log.info "Found #{results.size} nodes in cluster #{cluster_name}."
     # Now we grab each node's IP address and store in our cluster_addresses array
     results.each do | result |
       if result['mysql']['bind_interface']
