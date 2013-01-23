@@ -20,6 +20,12 @@
 # limitations under the License.
 #
 
+# Interface on this node to bind MySQL to. If not nil, this will override
+# the value that goes in node['mysql']['bind_address'].
+default['mysql']['bind_interface'] = nil
+
+default['mysql']['version'] = '5.5.28'
+
 default['galera']['packages']['mysql_server']['download_root'] = "https://launchpad.net/codership-mysql/5.5/5.5.28-23.7/+download/"
 default['galera']['packages']['galera']['download_root'] = "https://launchpad.net/galera/2.x/23.2.2/+download/"
 
@@ -40,19 +46,16 @@ else
   default['wsrep']['provider'] = "/usr/lib/galera/libgalera_smm.so"
 end
 
-# The mysql::server attributes set bind_address to 127.0.0.1 for both cloud
-# and node defaults. This is not compatible with Galera, which needs
-# bind_address to be commented out in my.cnf.
-default['mysql']['bind_address'] = nil
+# The name of the Chef role for servers involved in a Galera cluster
+# When writing the wsrep_urls, the recipe searches for nodes that
+# are assigned this Chef role and have a matching wsrep_cluster_name
+default['galera']['chef_role'] = 'galera'
 
-# The following node attribute should contain the hostnames or IP addresses of
-# all nodes in the Galera MySQL cluster. Override in your environment
-# and/or role definition files.
-default['galera']['nodes'] = []
-
-# The hostname or IP address of the initiator node for Galera. Should match
-# one of the hosts in default['galera']['nodes']
-default['galera']['init_node'] = nil
+# The name of the Chef role for servers that are the reference node
+# in a cluster. The reference node is the first server in a cluster
+# started and, if taken out of load-balancing rotation, can serve
+# as the node that is most easily used as a backup and conflict resolver.
+default['galera']['reference_node_chef_role'] = 'galera-reference'
 
 # Sets debug logging in the WSREP adapter
 default['wsrep']['debug'] = false
@@ -65,6 +68,9 @@ default['wsrep']['user'] = "wsrep_sst"
 
 # Port that SST communication will go over.
 default['wsrep']['port'] = 4567
+
+# Options specific to the WSREP provider.
+default['wsrep']['provider_options'] = ""
 
 # Logical cluster name. Should be the same for all nodes in the cluster.
 default['wsrep']['cluster_name'] = "my_galera_cluster"
@@ -92,7 +98,8 @@ default['wsrep']['auto_increment_control'] = 1
 # enable "strictly synchronous" semantics for read operations
 default['wsrep']['casual_reads'] = 0
 
-# State Snapshot Transfer method
+# State Snapshot Transfer method. Note that if you set this
+# to mysqldump, you will need to set wsrep_user above to root.
 default['wsrep']['sst_method'] = "rsync"
 
 # Interface on this node to receive SST communication.

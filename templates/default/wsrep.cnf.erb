@@ -4,13 +4,16 @@
 
 [mysqld]
 
+# Cluster address to connect to for GCS
+wsrep_cluster_address = <%= @wsrep_cluster_address %>
+
 # Full path to wsrep provider library or 'none'
 wsrep_provider = <%= node['wsrep']['provider'] %>
 
-wsrep_node_address =
+wsrep_node_address = <%= @wsrep_node_address %>
 
 # Provider specific configuration options
-#wsrep_provider_options =
+wsrep_provider_options = <%= node['wsrep']['provider_options'] %>
 
 # Logical cluster name. Should be the same for all nodes.
 wsrep_cluster_name = <%= node['wsrep']['cluster_name'] %>

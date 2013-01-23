@@ -34,6 +34,14 @@ if Chef::Config[:solo]
         "For more information, see https://github.com/opscode-cookbooks/mysql#chef-solo-note"
       ].join(' '))
   end
+
+  if node['galera']['nodes'].empty?
+    fail_msg = "You must set node['galera']['nodes'] to a list of IP addresses or hostnames for each node in your cluster if you are using Chef Solo"
+    Chef::Application.fatal!(fail_msg)
+  end
+  cluster_addresses = node["galera"]["nodes"]
+  # Just assume first node is reference node...
+  reference_node = node["galera"]["nodes"][0]
 else
   # generate all passwords
   node.set_unless['mysql']['server_debian_password'] = secure_password
@@ -44,6 +52,44 @@ else
   # SST authentication string. This will be used to send SST to joining nodes.
   # Depends on SST method. For mysqldump method it is wsrep_sst:<wsrep password>
   node.set['wsrep']['sst_auth'] = "#{node['wsrep']['user']}:#{node['wsrep']['password']}"
+
+  galera_role = node["galera"]["chef_role"]
+  galera_reference_role = node["galera"]["reference_node_chef_role"]
+  cluster_name = node["wsrep"]["cluster_name"]
+  cluster_addresses = []
+
+  ::Chef::Log.info "Searching for nodes having role '#{galera_role}' and cluster name '#{cluster_name}'"
+  query = "roles:#{galera_role} AND wsrep_cluster_name:#{cluster_name}"
+  results, _, _ = ::Chef::Search::Query.new.search :node, query
+
+  if resulst.empty?
+    ::Chef::Application.exit!("Searched for role #{galera_role} and cluster name #{cluster_name} found no nodes. Exiting.")
+  elsif results.size < 3
+    ::Chef::Application.exit!("You need at least three Galera nodes in the cluster. Found #{result.len}. Exiting.")
+  else
+    ::Chef::Log.info "Found #{result.size} nodes in cluster #{cluster_name}."
+    # Now we grab each node's IP address and store in our cluster_addresses array
+    results.each do | result |
+      if result['mysql']['bind_interface']
+        address = result['network']["ipaddress_#{result['mysql']['bind_interface']}"]
+      else
+        address = result['mysql']['bind_address']
+      end
+      ::Chef::Log.info "Adding #{address} to list of cluster addresses in cluster '#{cluster_name}'."
+      cluster_addresses << address
+    end
+
+    ::Chef.Log.info "Searching for reference node having role '#{galera_reference_role}' in cluster '#{cluster_name}'"
+    query = "roles:#{galera_reference_role} AND wsrep_cluster_name:#{cluster_name}"
+    results, _, _ = ::Chef::Search::Query.new.search :node, query
+    if results.empty?
+      ::Chef::Application.exit!("Could not find node with reference role. Exiting.")
+    elsif results.size != 1
+      ::Chef::Application.exit!("Can only be a single node in cluster '#{cluster_name}' with reference role. Found #{results.size}. Exiting.")
+    else
+      reference_node = results[0]
+    end
+  end
   node.save
 end
 
@@ -52,10 +98,18 @@ if platform_family?('windows') or platform_family?('mac_os_x')
   Chef::Application.fatal!(fail_msg)
 end
 
-if node['galera']['nodes'].empty?
-  fail_msg = "You must set node['galera']['nodes'] to a list of IP addresses or hostnames for each node in your cluster"
-  Chef::Application.fatal!(fail_msg)
+# If the user does have the bind_interface set, override
+# the bind_address with whatever address corresponds to the
+# interface.
+if node['mysql']['bind_interface']
+  node.set['mysql']['bind_address'] = result['network']["ipaddress_#{result['mysql']['bind_interface']}"]
 end
+if reference_node['mysql']['bind_interface']
+  reference_address = reference_node['network']["ipaddress_#{reference_node['mysql']['bind_interface']}"]
+else
+  reference_address = reference_node['mysql']['bind_address']
+end
+is_reference_node = (reference_address == node["mysql"]["bind_address"])
 
 # Any MySQL server packages installed need to be removed, as
 # Galera is a specially-packaged MySQL server version that includes
@@ -70,7 +124,7 @@ end
 packages = node['galera']['support_packages'].split(" ")
 packages.each do | pack |
   package pack do
-    action :upgrade
+    action :install
   end
 end
 
@@ -125,18 +179,37 @@ node.set['mysql']['tunable']['innodb_support_xa'] = "0"
 # with --skip-federated...
 skip_federated = false
 
-# The wsrep_urls is a collection of the cluster node URIs with gcomm:// at the end
-# to indicate to the first node that runs it to initialize a cluster.
-cluster_urls = ""
-node['galera']['nodes'].each do |address|
-  cluster_urls = "#{cluster_urls}gcomm://#{address},"
-end
-cluster_urls = "#{cluster_urls}gcomm://"
-
 service "mysql" do
   service_name node['mysql']['service_name']
   supports :status => true, :restart => true, :reload => true
   action :nothing
+end
+
+# In order to initialize the Galera cluster, the first
+# node in the cluster (doesn't matter which one) needs
+# to be started like so:
+#
+#  $> mysqld_safe --wsrep_cluster_address=gcomm://
+#
+# And then shut down. This initializes the cluster. Afterwards,
+# the same server can be started up with --wsrep-cluster-address=gcomm://<NODE_IP>
+galera_cache_file = ::File.join node['mysql']['data_dir'], 'galera.cache'
+is_galera_initialized = ::FileTest.exists?(galera_cache_file)
+if is_reference_node
+  if not is_galera_initialized
+    # Special instruction to initialize the cluster...
+    wsrep_cluster_address = 'gcomm://'
+  else
+    # Need to set the cluster address to ourselves, but
+    # eventually when the other nodes come online, can be
+    # set to any of them...
+    wsrep_cluster_address = "gcomm://#{reference_address}"
+  end
+else
+  # Need to wait until the reference node is done being
+  # initialized and then attempt to connect to it.
+  sleep 60
+  wsrep_cluster_address = "gcomm://#{reference_address}"
 end
 
 template "#{node['mysql']['conf_dir']}/my.cnf" do
@@ -144,19 +217,10 @@ template "#{node['mysql']['conf_dir']}/my.cnf" do
   owner "root"
   group node['mysql']['root_group']
   mode 00644
-  case node['mysql']['reload_action']
-  when 'restart'
-    notifies :restart, "service[mysql]", :immediately
-  when 'reload'
-    notifies :reload, "service[mysql]", :immediately
-  else
-    Chef::Log.info "my.cnf updated but mysql.reload_action is #{node['mysql']['reload_action']}. No action taken."
-  end
-  variables(
-    "skip_federated" => skip_federated,
-    "wsrep_urls" => cluster_urls
-  )
   notifies :restart, "service[mysql]"
+  variables(
+    "skip_federated" => skip_federated
+  )
 end
 
 sst_receive_address = node['network']["ipaddress_#{node['wsrep']['sst_receive_interface']}"]
@@ -165,24 +229,20 @@ template "#{node['mysql']['confd_dir']}/wsrep.cnf" do
   owner "root"
   group node['mysql']['root_group']
   mode 00644
-  case node['mysql']['reload_action']
-  when 'restart'
-    notifies :restart, "service[mysql]", :immediately
-  when 'reload'
-    notifies :reload, "service[mysql]", :immediately
-  else
-    Chef::Log.info "wsrep.cnf updated but mysql.reload_action is #{node['mysql']['reload_action']}. No action taken."
-  end
+  notifies :restart, "service[mysql]", :immediately
   variables(
-    "sst_receive_address" => sst_receive_address
+    "sst_receive_address" => sst_receive_address,
+    "wsrep_cluster_address" => wsrep_cluster_address,
+    "wsrep_node_address" => node['mysql']['bind_address']
   )
-  notifies :restart, "service[mysql]"
 end
 
 execute 'mysql-install-db' do
   command "mysql_install_db"
   action :run
-  not_if { File.exists?(node['mysql']['data_dir'] + '/mysql/user.frm') }
+  # Do not need to install databases on non-reference nodes since
+  # SST will replicate the databases to those nodes
+  not_if { not is_reference_node or File.exists?(node['mysql']['data_dir'] + '/mysql/user.frm') }
 end
 
 # set the root password for situations that don't support pre-seeding.
