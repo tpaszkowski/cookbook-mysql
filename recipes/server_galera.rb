@@ -151,7 +151,7 @@ remote_file "#{Chef::Config[:file_cache_path]}/#{mysql_server_package}" do
   action :create_if_missing
 end
 
-dkpg_package "#{mysql_server_package}" do
+dpkg_package "#{mysql_server_package}" do
   source "#{Chef::Config[:file_cache_path]}/#{mysql_server_package}"
 end
 
