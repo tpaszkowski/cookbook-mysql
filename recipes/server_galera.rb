@@ -102,7 +102,7 @@ end
 # the bind_address with whatever address corresponds to the
 # interface.
 if node['mysql']['bind_interface']
-  node.set['mysql']['bind_address'] = result['network']["ipaddress_#{result['mysql']['bind_interface']}"]
+  node.set['mysql']['bind_address'] = node['network']["ipaddress_#{node['mysql']['bind_interface']}"]
 end
 if reference_node['mysql']['bind_interface']
   reference_address = reference_node['network']["ipaddress_#{reference_node['mysql']['bind_interface']}"]
