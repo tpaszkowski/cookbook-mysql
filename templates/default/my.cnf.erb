@@ -31,9 +31,7 @@ socket          = <%= node['mysql']['socket'] %>
 [mysqld_safe]
 socket          = <%= node['mysql']['socket'] %>
 nice            = <%= node['mysql']['nice'] %>
-<%- if not @wsrep_urls.nil? -%>
-wsrep_urls = <%= @wsrep_urls %>
-<%- end -%>
+
 [mysqld]
 #
 # * Basic Settings
@@ -69,11 +67,9 @@ skip-character-set-client-handshake
 
 #
 # Instead of skip-networking the default is now to listen only on
-# localhost which is more compatible and is not less secure. When using
-# WSREP/Galera, this should not be set.
-<%- if @wsrep_urls.nil? -%>
+# localhost which is more compatible and is not less secure.
 bind-address            = <%= node['mysql']['bind_address'] %>
-<%- end -%>
+
 #
 # * Fine Tuning
 #

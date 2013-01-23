@@ -212,7 +212,7 @@ unless platform_family?(%w{mac_os_x})
     else
       Chef::Log.info "my.cnf updated but mysql.reload_action is #{node['mysql']['reload_action']}. No action taken."
     end
-    variables :skip_federated => skip_federated, :wsrep_urls => nil
+    variables :skip_federated => skip_federated
   end
 
   service "mysql" do
