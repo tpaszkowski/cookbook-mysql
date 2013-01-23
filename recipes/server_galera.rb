@@ -59,13 +59,13 @@ else
   cluster_addresses = []
 
   ::Chef::Log.info "Searching for nodes having role '#{galera_role}' and cluster name '#{cluster_name}'"
-  query = "roles:#{galera_role} AND wsrep_cluster_name:#{cluster_name}"
+  query = "role:#{galera_role} AND wsrep_cluster_name:#{cluster_name}"
   results, _, _ = ::Chef::Search::Query.new.search :node, query
 
   if results.empty?
-    ::Chef::Application.exit!("Searched for role #{galera_role} and cluster name #{cluster_name} found no nodes. Exiting.")
+    ::Chef::Application.fatal!("Searched for role #{galera_role} and cluster name #{cluster_name} found no nodes. Exiting.")
   elsif results.size < 3
-    ::Chef::Application.exit!("You need at least three Galera nodes in the cluster. Found #{result.len}. Exiting.")
+    ::Chef::Application.fatal!("You need at least three Galera nodes in the cluster. Found #{result.len}. Exiting.")
   else
     ::Chef::Log.info "Found #{result.size} nodes in cluster #{cluster_name}."
     # Now we grab each node's IP address and store in our cluster_addresses array
@@ -80,12 +80,12 @@ else
     end
 
     ::Chef.Log.info "Searching for reference node having role '#{galera_reference_role}' in cluster '#{cluster_name}'"
-    query = "roles:#{galera_reference_role} AND wsrep_cluster_name:#{cluster_name}"
+    query = "role:#{galera_reference_role} AND wsrep_cluster_name:#{cluster_name}"
     results, _, _ = ::Chef::Search::Query.new.search :node, query
     if results.empty?
-      ::Chef::Application.exit!("Could not find node with reference role. Exiting.")
+      ::Chef::Application.fatal!("Could not find node with reference role. Exiting.")
     elsif results.size != 1
-      ::Chef::Application.exit!("Can only be a single node in cluster '#{cluster_name}' with reference role. Found #{results.size}. Exiting.")
+      ::Chef::Application.fatal!("Can only be a single node in cluster '#{cluster_name}' with reference role. Found #{results.size}. Exiting.")
     else
       reference_node = results[0]
     end
