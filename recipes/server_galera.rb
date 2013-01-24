@@ -88,7 +88,7 @@ else
     else
       address = result['mysql']['bind_address']
     end
-    unless node.name == result.name
+    unless result.run_list.role_names.include?(galera_reference_role)
       ::Chef::Log.info "Adding #{address} to list of cluster addresses in cluster '#{cluster_name}'."
       cluster_addresses << address
     end
@@ -241,13 +241,17 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
   if master
     wsrep_cluster_address = "gcomm://"
 
+    file node["galera"]["mysqld_pid"] do
+      owner "mysql"
+      group "mysql"
+    end
     # TODO: It would be nice if we could implement howto check that mysql 
     # proccess is accepting connections and remove from script ugly 'sleep'.
     script "create-cluster" do
       user "root"
+      interpreter "bash"
       code <<-EOH
-      mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
-      echo $! > #{node["galera"]["mysqld_pid"]}
+      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
       sleep 10
       EOH
     end
@@ -290,10 +294,10 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       interpreter "bash"
       code <<-EOH
       TIMER=300
-      until [ $TIMER -lt 1]; do
-      /usr/bin/mysql -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
+      until [ $TIMER -lt 1 ]; do
+      /usr/bin/mysql -p#{node["mysql"]["server_root_password"]} -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
       rs=$?
-      if [[rs == 0 ]] ;
+      if [[ $rs == 0 ]] ; then
       exit 0
       fi
       echo Waiting for sync..
@@ -333,6 +337,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
           end
         end
       end
+      action :nothing
     end
 
     # Block to stop mysql proccess by pid when all slave ALREADY synced and restarted with correct config
@@ -341,10 +346,10 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       code <<-EOH
       kill `cat #{node["galera"]["mysqld_pid"]}`
       TIMER=60
-      until [ $TIMER -lt 1]; do
+      until [ $TIMER -lt 1 ]; do
       ps ax|grep -v grep|grep -q mysql
       rs=$?
-      if [[rs == 0 ]] ;
+      if [[ $rs == 1 ]] ; then
       exit 0
       fi
       echo Stopping mysqld proccess. Please wait a little while..
@@ -380,9 +385,9 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
     # TODO: same thing - remove 'sleep'.
     script "create-cluster" do
       user "root"
+      interpreter "bash"
       code <<-EOH
-      mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address}
-      echo $! > /var/run/cluster_init.pid
+      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
       sleep 15
       EOH
       notifies :run, "script[Check-sync-status]", :immediately
@@ -394,10 +399,10 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       code <<-EOH
       kill `cat #{node["galera"]["mysqld_pid"]}`
       TIMER=60
-      until [ $TIMER -lt 1]; do
+      until [ $TIMER -lt 1 ]; do
       ps ax|grep -v grep|grep -q mysql
       rs=$?
-      if [[rs == 0 ]] ;
+      if [[ $rs == 1 ]] ; then
       exit 0
       fi
       echo Stopping mysqld proccess. Please wait a little while..
