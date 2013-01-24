@@ -306,7 +306,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
     end
 
     # ruby_block Set synced state
-    ruby block "Set-initial_replicate-state" do
+    ruby_block "Set-initial_replicate-state" do
       block do
         node.set_unless["galera"] ||={}
         node.set_unless["galera"]["cluster_initial_replicate"] = "ok"
