@@ -31,6 +31,8 @@ class Chef::Resource::RubyBlock
   end
 end
 
+#Some predefines. After tests should be gone into attrs of cookbook
+node.set_unless["galera"]["mysqld_pid"] = "/var/run/cluster_init.pid"
 
 if Chef::Config[:solo]
   missing_attrs = %w{
@@ -70,7 +72,7 @@ else
   cluster_addresses = []
 
   ::Chef::Log.info "Searching for nodes having role '#{galera_role}' and cluster name '#{cluster_name}'"
-  #Shorter query format (alff), also reduce result count by chef_environment
+  # Shorter query format (alff), also reduce result count by chef_environment
   results = search(:node, "role:#{galera_role} AND wsrep_cluster_name:#{cluster_name} AND chef_environment:#{node.chef_environment}")
 
   if results.empty?
@@ -81,13 +83,15 @@ else
     ::Chef::Log.info "Found #{results.size} nodes in cluster #{cluster_name}."
     # Now we grab each node's IP address and store in our cluster_addresses array
     results.each do | result |
-      if result['mysql']['bind_interface']
-        address = result['network']["ipaddress_#{result['mysql']['bind_interface']}"]
-      else
-        address = result['mysql']['bind_address']
-      end
+    if result['mysql']['bind_interface']
+      address = result['network']["ipaddress_#{result['mysql']['bind_interface']}"]
+    else
+      address = result['mysql']['bind_address']
+    end
+    unless node.name == result.name
       ::Chef::Log.info "Adding #{address} to list of cluster addresses in cluster '#{cluster_name}'."
       cluster_addresses << address
+    end
     end
     
     ::Chef::Log.info "Searching for reference node having role '#{galera_reference_role}' in cluster '#{cluster_name}'"
@@ -102,6 +106,10 @@ else
   end
   node.save
 end
+
+# Compose list of galera ip's
+wsrep_ip_list = "gcomm://" + cluster_addresses.join(',')
+
 
 if platform_family?('windows') or platform_family?('mac_os_x')
   fail_msg = "Windows and Mac OSX is not supported by the Galera MySQL solution."
@@ -213,119 +221,192 @@ template "#{node['mysql']['confd_dir']}/wsrep.cnf" do
   owner "root"
   group node['mysql']['root_group']
   mode 00644
-  notifies :restart, resources(:service => "mysql"), :immediately
+  notifies :restart, "service[mysql]"
   variables(
     "sst_receive_address" => sst_receive_address,
-    "wsrep_cluster_address" => wsrep_cluster_address,
+    "wsrep_cluster_address" => wsrep_ip_list,
     "wsrep_node_address" => node['mysql']['bind_address']
   )
 end
 
-====
-
-#First step create cluster
+# First step create cluster
 if node.run_list.role_names.include?(galera_reference_role)
   master = true
 else
   master = false
 end
 
-#TODO: create much pretty method to call resources like a functions. alff
-unless node["galera"]["cluster_replicate_state"] == "ok"
+# TODO: create much pretty method to call resources like a functions. alff
+unless node["galera"]["cluster_initial_replicate"] == "ok"
   if master
     wsrep_cluster_address = "gcomm://"
+
+    # TODO: It would be nice if we could implement howto check that mysql 
+    # proccess is accepting connections and remove from script ugly 'sleep'.
     script "create-cluster" do
       user "root"
       code <<-EOH
-      mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address}
-      echo $! > /var/run/cluster_init.pid
+      mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
+      echo $! > #{node["galera"]["mysqld_pid"]}
+      sleep 10
       EOH
     end
 
-    #ruby_block for check state "synced"
+    execute 'mysql-install-db' do
+      command "mysql_install_db"
+      action :run
+      # Do not need to install databases on non-reference nodes since
+      # SST will replicate the databases to those nodes
+      not_if { File.exists?(node['mysql']['data_dir'] + '/mysql/user.frm') }
+    end
 
-    #ruby_block Set synced state
+    # set the root password for situations that don't support pre-seeding.
+    # (eg. platforms other than debian/ubuntu & drop-in mysql replacements)
+    execute "assign-root-password" do
+      command "\"#{node['mysql']['mysqladmin_bin']}\" -u root password \"#{node['mysql']['server_root_password']}\""
+      action :run
+      only_if "\"#{node['mysql']['mysql_bin']}\" -u root -e 'show databases;'"
+    end
+
+    execute "delete-blank-users" do
+      sql_command = "SET wsrep_on=OFF; DELETE FROM mysql.user WHERE user='';"
+      command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
+      action :run
+    end
+
+    wsrep_user = node['wsrep']['user']
+    wsrep_pass = node['wsrep']['password']
+    execute "grant-wsrep-user" do
+      sql_command = "SET wsrep_on=OFF; GRANT ALL ON *.* TO #{wsrep_user}@'%' IDENTIFIED BY '#{wsrep_pass}';"
+      command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
+      action :run
+    end
 
 
-    #Looking for others
-    #TODO: move timeout into attrs
-    ruby_block "search-slaves" do
+    # TODO: move timeout into attrs
+    # block for check state "synced"
+    script "Check-sync-status" do
+      user "root"
+      interpreter "bash"
+      code <<-EOH
+      TIMER=300
+      until [ $TIMER -lt 1]; do
+      /usr/bin/mysql -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
+      rs=$?
+      if [[rs == 0 ]] ;
+      exit 0
+      fi
+      echo Waiting for sync..
+      sleep 5
+      let TIMER-=5
+      done
+      exit 1
+      EOH
+      notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
+    end
+
+    # ruby_block Set synced state
+    ruby block "Set-initial_replicate-state" do
+      block do
+        node.set_unless["galera"] ||={}
+        node.set_unless["galera"]["cluster_initial_replicate"] = "ok"
+        node.save
+      end
+      action :nothing
+      notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
+    end
+
+    # Looking for others
+    # TODO: move timeout into attrs
+    ruby_block "Search-other-galera-mysql-servers" do
       block do
         results.each do |result|
           sttime=Time.now.to_f
-          until result.attribute?("galera")&&result["galera"].key?("cluster_replicate_state")&&result["galera"]["cluster_replicate_state"]=="ok" do
+          until result.attribute?("galera")&&result["galera"].key?("cluster_initial_replicate")&&result["galera"]["cluster_initial_replicate"]=="ok" do
             if (Time.now.to_f-sttime)>=300
-              Chef::Log.error "Timeout exceeded while node #{result.name} syncing.."
-              exit 1
+              Chef::Application.fatal! "Timeout exceeded while node #{result.name} syncing.."
             else
               Chef::Log.info "Waiting while node #{result.name} syncing.."
               sleep 10
-              result = search(:node, "name:#{result["fqdn"]} AND chef_environment:#{node.chef_environment}")[0]
+              result = search(:node, "name:#{result.name} AND chef_environment:#{node.chef_environment}")[0]
             end
           end
         end
       end
     end
 
-    #block to stop mysql proccess by pid
-
-    #compose results except self own ip
-
-    #start mysql service !!!!
-
+    # Block to stop mysql proccess by pid when all slave ALREADY synced and restarted with correct config
+    script "Stop-master-galera-server" do
+      interpreter "bash"
+      code <<-EOH
+      kill `cat #{node["galera"]["mysqld_pid"]}`
+      TIMER=60
+      until [ $TIMER -lt 1]; do
+      ps ax|grep -v grep|grep -q mysql
+      rs=$?
+      if [[rs == 0 ]] ;
+      exit 0
+      fi
+      echo Stopping mysqld proccess. Please wait a little while..
+      sleep 5
+      let TIMER-=5
+      done
+      exit 1
+      EOH
+      notifies :start, "service[mysql]", :immediately
+    end
   else
     wsrep_cluster_address = "gcomm://#{reference_address}"
 
-#block waiting for master
+    # Block waiting for master
+    ruby_block "Check-master-state" do
+      block do
+        sttime=Time.now.to_f
+        result = reference_node
+        until result.attribute?("galera")&&result["galera"].key?("cluster_initial_replicate")&&result["galera"]["cluster_initial_replicate"]=="ok" do
+          if (Time.now.to_f-sttime)>=300
+            Chef::Log.error "Timeout exceeded while reference node #{result.name} syncing.."
+            exit 1
+          else
+            Chef::Log.info "Waiting while node #{result.name} syncing.."
+            sleep 10
+            result = search(:node, "name:#{result.name} AND chef_environment:#{node.chef_environment}")[0]
+          end
+        end
+      end
+    end
 
-    #initial connect to the cluster
+    # Initial connect to the cluster
+    # TODO: same thing - remove 'sleep'.
     script "create-cluster" do
       user "root"
       code <<-EOH
       mysqld --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address}
       echo $! > /var/run/cluster_init.pid
+      sleep 15
       EOH
+      notifies :run, "script[Check-sync-status]", :immediately
     end
 
-    #block check synced
-
-    #block set status synced
-
-    #block wait for master galera server start with final config
-    
-    #start mysql service !!!!
-
-
+    # Stop mysqld process
+    script "Stop-galera-server" do
+      interpreter "bash"
+      code <<-EOH
+      kill `cat #{node["galera"]["mysqld_pid"]}`
+      TIMER=60
+      until [ $TIMER -lt 1]; do
+      ps ax|grep -v grep|grep -q mysql
+      rs=$?
+      if [[rs == 0 ]] ;
+      exit 0
+      fi
+      echo Stopping mysqld proccess. Please wait a little while..
+      sleep 5
+      let TIMER-=5
+      done
+      exit 1
+      EOH
+      notifies :start, "service[mysql]", :immediately
+    end
   end
-end
-
-#FIXME: implenent next blocks into galera cluster set up
-execute 'mysql-install-db' do
-  command "mysql_install_db"
-  action :run
-  # Do not need to install databases on non-reference nodes since
-  # SST will replicate the databases to those nodes
-  not_if { not is_reference_node or File.exists?(node['mysql']['data_dir'] + '/mysql/user.frm') }
-end
-
-# set the root password for situations that don't support pre-seeding.
-# (eg. platforms other than debian/ubuntu & drop-in mysql replacements)
-execute "assign-root-password" do
-  command "\"#{node['mysql']['mysqladmin_bin']}\" -u root password \"#{node['mysql']['server_root_password']}\""
-  action :run
-  only_if "\"#{node['mysql']['mysql_bin']}\" -u root -e 'show databases;'"
-end
-
-execute "delete-blank-users" do
-  sql_command = "SET wsrep_on=OFF; DELETE FROM mysql.user WHERE user='';"
-  command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
-  action :run
-end
-
-wsrep_user = node['wsrep']['user']
-wsrep_pass = node['wsrep']['password']
-execute "grant-wsrep-user" do
-  sql_command = "SET wsrep_on=OFF; GRANT ALL ON *.* TO #{wsrep_user}@'%' IDENTIFIED BY '#{wsrep_pass}';"
-  command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
-  action :run
 end
