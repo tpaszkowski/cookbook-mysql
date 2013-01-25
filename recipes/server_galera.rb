@@ -416,7 +416,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       done
       exit 1
       EOH
-      notifies :run, "script[Check-sync-status]", :immediately
+      #notifies :run, "script[Check-sync-status]", :immediately
     end
 
     # Hmmm... Looks like deprecated block ########
