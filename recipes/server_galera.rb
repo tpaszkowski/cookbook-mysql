@@ -397,6 +397,25 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
         end
       end
       notifies :start, "service[mysql]", :immediately
+    end
+
+    script "Check-temporary-status" do
+      user "root"
+      interpreter "bash"
+      code <<-EOH
+      TIMER=300
+      until [ $TIMER -lt 1 ]; do
+      /usr/bin/mysql -p#{reference_node['mysql']['server_root_password']} -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
+      rs=$?
+      if [[ $rs == 0 ]] ; then
+      exit 0
+      fi
+      echo Waiting for sync..
+      sleep 5
+      let TIMER-=5
+      done
+      exit 1
+      EOH
       notifies :run, "script[Check-sync-status]", :immediately
     end
 
