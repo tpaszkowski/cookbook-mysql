@@ -74,6 +74,7 @@ else
   ::Chef::Log.info "Searching for nodes having role '#{galera_role}' and cluster name '#{cluster_name}'"
   # Shorter query format (alff), also reduce result count by chef_environment
   results = search(:node, "role:#{galera_role} AND wsrep_cluster_name:#{cluster_name} AND chef_environment:#{node.chef_environment}")
+  galera_nodes = results
 
   if results.empty?
     ::Chef::Application.fatal!("Searched for role #{galera_role} and cluster name #{cluster_name} found no nodes. Exiting.")
@@ -88,7 +89,7 @@ else
     else
       address = result['mysql']['bind_address']
     end
-    unless result.run_list.role_names.include?(galera_reference_role)
+    unless result.name == node.name
       ::Chef::Log.info "Adding #{address} to list of cluster addresses in cluster '#{cluster_name}'."
       cluster_addresses << address
     end
@@ -186,6 +187,11 @@ end
   end
 end
 
+file node["galera"]["mysqld_pid"] do
+  owner "mysql"
+  group "mysql"
+end
+
 # The following variables in the my.cnf MUST BE set
 # this way for Galera to work properly.
 # alff note: All these attrs should be move in environment or at least in galera cookbook attrs
@@ -236,22 +242,80 @@ else
   master = false
 end
 
+# Resources as a functions
+
+# TODO: move timeout into attrs
+# block for check state "synced"
+script "Check-sync-status" do
+  user "root"
+  interpreter "bash"
+  code <<-EOH
+  TIMER=300
+  until [ $TIMER -lt 1 ]; do
+  /usr/bin/mysql -p#{reference_node['mysql']['server_root_password']} -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
+  rs=$?
+  if [[ $rs == 0 ]] ; then
+  exit 0
+  fi
+  echo Waiting for sync..
+  sleep 5
+  let TIMER-=5
+  done
+  exit 1
+  EOH
+  notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
+  action :nothing
+end
+
+# ruby_block Set synced state
+ruby_block "Set-initial_replicate-state" do
+  block do
+    node.set_unless["galera"] ||={}
+    node.set_unless["galera"]["cluster_initial_replicate"] = "ok"
+    node.save
+  end
+  action :nothing
+  notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
+end
+
+# Looking for others
+# TODO: move timeout into attrs
+ruby_block "Search-other-galera-mysql-servers" do
+  block do
+    puts "RESULT SIZE:#{galera_nodes.size}"
+    galera_nodes.each do |r|
+      puts r.name
+    end
+    sleep 6
+    galera_nodes.each do |result|
+      sttime=Time.now.to_f
+      until result.attribute?("galera")&&result["galera"].key?("cluster_initial_replicate")&&result["galera"]["cluster_initial_replicate"]=="ok" do
+        if (Time.now.to_f-sttime)>=300
+          Chef::Application.fatal! "Timeout exceeded while node #{result.name} syncing.."
+        else
+          Chef::Log.info "Waiting while node #{result.name} syncing.."
+          sleep 10
+          result = search(:node, "name:#{result.name} AND chef_environment:#{node.chef_environment}")[0]
+        end
+      end
+    end
+  end
+  action :nothing
+end
+# End of block
+
 # TODO: create much pretty method to call resources like a functions. alff
 unless node["galera"]["cluster_initial_replicate"] == "ok"
   if master
     wsrep_cluster_address = "gcomm://"
 
-    file node["galera"]["mysqld_pid"] do
-      owner "mysql"
-      group "mysql"
-    end
     # TODO: It would be nice if we could implement howto check that mysql 
     # proccess is accepting connections and remove from script ugly 'sleep'.
     script "create-cluster" do
       user "root"
       interpreter "bash"
       code <<-EOH
-      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
+      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
       sleep 10
       EOH
     end
@@ -286,60 +350,6 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       action :run
     end
 
-
-    # TODO: move timeout into attrs
-    # block for check state "synced"
-    script "Check-sync-status" do
-      user "root"
-      interpreter "bash"
-      code <<-EOH
-      TIMER=300
-      until [ $TIMER -lt 1 ]; do
-      /usr/bin/mysql -p#{node["mysql"]["server_root_password"]} -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
-      rs=$?
-      if [[ $rs == 0 ]] ; then
-      exit 0
-      fi
-      echo Waiting for sync..
-      sleep 5
-      let TIMER-=5
-      done
-      exit 1
-      EOH
-      notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
-    end
-
-    # ruby_block Set synced state
-    ruby_block "Set-initial_replicate-state" do
-      block do
-        node.set_unless["galera"] ||={}
-        node.set_unless["galera"]["cluster_initial_replicate"] = "ok"
-        node.save
-      end
-      action :nothing
-      notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
-    end
-
-    # Looking for others
-    # TODO: move timeout into attrs
-    ruby_block "Search-other-galera-mysql-servers" do
-      block do
-        results.each do |result|
-          sttime=Time.now.to_f
-          until result.attribute?("galera")&&result["galera"].key?("cluster_initial_replicate")&&result["galera"]["cluster_initial_replicate"]=="ok" do
-            if (Time.now.to_f-sttime)>=300
-              Chef::Application.fatal! "Timeout exceeded while node #{result.name} syncing.."
-            else
-              Chef::Log.info "Waiting while node #{result.name} syncing.."
-              sleep 10
-              result = search(:node, "name:#{result.name} AND chef_environment:#{node.chef_environment}")[0]
-            end
-          end
-        end
-      end
-      action :nothing
-    end
-
     # Block to stop mysql proccess by pid when all slave ALREADY synced and restarted with correct config
     script "Stop-master-galera-server" do
       interpreter "bash"
@@ -361,7 +371,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       notifies :start, "service[mysql]", :immediately
     end
   else
-    wsrep_cluster_address = "gcomm://#{reference_address}"
+    wsrep_cluster_address = wsrep_ip_list
 
     # Block waiting for master
     ruby_block "Check-master-state" do
@@ -387,7 +397,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       user "root"
       interpreter "bash"
       code <<-EOH
-      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_sst_method=#{node["wsrep"]["sst_method"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
+      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
       sleep 15
       EOH
       notifies :run, "script[Check-sync-status]", :immediately
