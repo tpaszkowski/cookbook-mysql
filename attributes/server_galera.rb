@@ -23,6 +23,7 @@
 # Interface on this node to bind MySQL to. If not nil, this will override
 # the value that goes in node['mysql']['bind_address'].
 default['mysql']['bind_interface'] = nil
+default['mysql']['bind_address'] = node.ipaddress
 
 default['mysql']['version'] = '5.5.28'
 
