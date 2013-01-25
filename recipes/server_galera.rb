@@ -253,6 +253,10 @@ script "Check-sync-status" do
   code <<-EOH
   TIMER=300
   until [ $TIMER -lt 1 ]; do
+  echo DEBUG
+  /usr/bin/mysql -p#{reference_node['mysql']['server_root_password']} -Nbe "show status like 'wsrep_local_state_comment'"
+  sleep 8
+  echo EOD
   /usr/bin/mysql -p#{reference_node['mysql']['server_root_password']} -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
   rs=$?
   if [[ $rs == 0 ]] ; then
@@ -283,12 +287,11 @@ end
 # TODO: move timeout into attrs
 ruby_block "Search-other-galera-mysql-servers" do
   block do
-    puts "RESULT SIZE:#{galera_nodes.size}"
-    galera_nodes.each do |r|
-      puts r.name
-    end
-    sleep 6
     galera_nodes.each do |result|
+      # Remove reference from check
+      if result.run_list.role_names.include?(galera_reference_role)
+        next
+      end
       sttime=Time.now.to_f
       until result.attribute?("galera")&&result["galera"].key?("cluster_initial_replicate")&&result["galera"]["cluster_initial_replicate"]=="ok" do
         if (Time.now.to_f-sttime)>=300
@@ -367,6 +370,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       ps ax|grep -v grep|grep -q mysql
       rs=$?
       if [[ $rs == 1 ]] ; then
+      sleep 5
       exit 0
       fi
       echo Stopping mysqld proccess. Please wait a little while..
@@ -397,26 +401,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
         end
       end
       notifies :start, "service[mysql]", :immediately
-    end
-
-    script "Check-temporary-status" do
-      user "root"
-      interpreter "bash"
-      code <<-EOH
-      TIMER=300
-      until [ $TIMER -lt 1 ]; do
-      /usr/bin/mysql -p#{reference_node['mysql']['server_root_password']} -Nbe "show status like 'wsrep_local_state_comment'" | /bin/grep -q Synced
-      rs=$?
-      if [[ $rs == 0 ]] ; then
-      exit 0
-      fi
-      echo Waiting for sync..
-      sleep 5
-      let TIMER-=5
-      done
-      exit 1
-      EOH
-      #notifies :run, "script[Check-sync-status]", :immediately
+      notifies :run, "script[Check-sync-status]", :immediately
     end
 
     # Hmmm... Looks like deprecated block ########
