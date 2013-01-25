@@ -5,7 +5,7 @@
 [mysqld]
 
 # Cluster address to connect to for GCS
-wsrep_cluster_address = <%= @wsrep_ip_list %>
+wsrep_cluster_address = <%= @wsrep_cluster_address %>
 
 # Full path to wsrep provider library or 'none'
 wsrep_provider = <%= node['wsrep']['provider'] %>

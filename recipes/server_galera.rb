@@ -348,6 +348,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       sql_command = "SET wsrep_on=OFF; GRANT ALL ON *.* TO #{wsrep_user}@'%' IDENTIFIED BY '#{wsrep_pass}';"
       command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
       action :run
+      notifies :run, "script[Check-sync-status]", :immediately
     end
 
     # Block to stop mysql proccess by pid when all slave ALREADY synced and restarted with correct config
