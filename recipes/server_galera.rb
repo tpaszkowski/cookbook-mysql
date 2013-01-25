@@ -33,6 +33,7 @@ end
 
 #Some predefines. After tests should be gone into attrs of cookbook
 node.set_unless["galera"]["mysqld_pid"] = "/var/run/cluster_init.pid"
+node.set_unless["galera"]["rsync_pid"] = "/var/lib/mysql//rsync_sst.pid"
 
 if Chef::Config[:solo]
   missing_attrs = %w{
@@ -356,6 +357,11 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       interpreter "bash"
       code <<-EOH
       kill `cat #{node["galera"]["mysqld_pid"]}`
+      ps ax|grep -v grep|grep -q rsync_sst.conf
+      ss=$?
+      if [[ $ss == 0 ]] ; then
+      kill `cat #{node["galera"]["rsync_pid"]}`
+      fi
       TIMER=60
       until [ $TIMER -lt 1 ]; do
       ps ax|grep -v grep|grep -q mysql
@@ -390,8 +396,11 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
           end
         end
       end
+      notifies :start, "service[mysql]", :immediately
+      notifies :run, "script[Check-sync-status]", :immediately
     end
 
+    # Hmmm... Looks like deprecated block ########
     # Initial connect to the cluster
     # TODO: same thing - remove 'sleep'.
     script "create-cluster" do
@@ -401,7 +410,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
       sleep 15
       EOH
-      notifies :run, "script[Check-sync-status]", :immediately
+      action :nothing
     end
 
     # Stop mysqld process
@@ -409,6 +418,11 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       interpreter "bash"
       code <<-EOH
       kill `cat #{node["galera"]["mysqld_pid"]}`
+      ps ax|grep -v grep|grep -q rsync_sst.conf
+      ss=$?
+      if [[ $ss == 0 ]] ; then
+      kill `cat #{node["galera"]["rsync_pid"]}`
+      fi
       TIMER=60
       until [ $TIMER -lt 1 ]; do
       ps ax|grep -v grep|grep -q mysql
@@ -422,7 +436,9 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       done
       exit 1
       EOH
+      action :nothing
       notifies :start, "service[mysql]", :immediately
     end
+    #############################################
   end
 end
