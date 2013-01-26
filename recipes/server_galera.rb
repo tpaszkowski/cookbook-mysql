@@ -21,16 +21,6 @@
 
 include_recipe "mysql::client"
 
-class Chef::Resource::RubyBlock
-  def notme (n,a)
-    a.each do |c|
-      unless n.name==c.name
-        return c
-      end
-    end
-  end
-end
-
 #Some predefines. After tests should be gone into attrs of cookbook
 node.set_unless["galera"]["mysqld_pid"] = "/var/run/cluster_init.pid"
 node.set_unless["galera"]["rsync_pid"] = "/var/lib/mysql//rsync_sst.pid"
@@ -292,20 +282,25 @@ ruby_block "Search-other-galera-mysql-servers" do
       if result.run_list.role_names.include?(galera_reference_role)
         next
       end
-      sttime=Time.now.to_f
-      until result.attribute?("galera")&&result["galera"].key?("cluster_initial_replicate")&&result["galera"]["cluster_initial_replicate"]=="ok" do
-        if (Time.now.to_f-sttime)>=300
-          Chef::Application.fatal! "Timeout exceeded while node #{result.name} syncing.."
-        else
-          Chef::Log.info "Waiting while node #{result.name} syncing.."
-          sleep 10
-          result = search(:node, "name:#{result.name} AND chef_environment:#{node.chef_environment}")[0]
-        end
-      end
+      hash = {}
+      hash["attr"] = "galera"
+      hash["key"] = "cluster_initial_replicate"
+      hash["var"] = "ok"
+      hash["timeout"] = 300
+      hash["sttime"]=Time.now.to_f
+      check_state_attr(result,hash)
     end
   end
   action :nothing
 end
+# This block shows that galera service installed and configured properly
+ruby_block "Cluster-ready" do
+  block do
+    node.set["galera"]["cluster_status"] = "ready"
+  end
+  action :nothing
+end
+
 # End of block
 
 # TODO: create much pretty method to call resources like a functions. alff
@@ -355,6 +350,25 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       notifies :run, "script[Check-sync-status]", :immediately
     end
 
+
+    ruby_block "Check-cluster-status" do
+      block do
+        galera_nodes.each do |result|
+          # Remove reference from check
+          if result.run_list.role_names.include?(galera_reference_role)
+            next
+          end
+          hash = {}
+          hash["attr"] = "galera"
+          hash["key"] = "cluster_status"
+          hash["var"] = "ready"
+          hash["timeout"] = 300
+          hash["sttime"]=Time.now.to_f
+          check_state_attr(result,hash)
+        end
+      end
+    end
+
     # Block to stop mysql proccess by pid when all slave ALREADY synced and restarted with correct config
     script "Stop-master-galera-server" do
       interpreter "bash"
@@ -380,6 +394,7 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       exit 1
       EOH
       notifies :start, "service[mysql]", :immediately
+      notifies :create, "ruby_block[Cluster-ready]"
     end
   else
     wsrep_cluster_address = wsrep_ip_list
@@ -402,47 +417,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       end
       notifies :start, "service[mysql]", :immediately
       notifies :run, "script[Check-sync-status]", :immediately
+      notifies :create, "ruby_block[Cluster-ready]"
     end
 
-    # Hmmm... Looks like deprecated block ########
-    # Initial connect to the cluster
-    # TODO: same thing - remove 'sleep'.
-    script "create-cluster" do
-      user "root"
-      interpreter "bash"
-      code <<-EOH
-      mysqld --pid-file=#{node["galera"]["mysqld_pid"]} --wsrep_cluster_address=#{wsrep_cluster_address} &>1 &
-      sleep 15
-      EOH
-      action :nothing
-    end
-
-    # Stop mysqld process
-    script "Stop-galera-server" do
-      interpreter "bash"
-      code <<-EOH
-      kill `cat #{node["galera"]["mysqld_pid"]}`
-      ps ax|grep -v grep|grep -q rsync_sst.conf
-      ss=$?
-      if [[ $ss == 0 ]] ; then
-      kill `cat #{node["galera"]["rsync_pid"]}`
-      fi
-      TIMER=60
-      until [ $TIMER -lt 1 ]; do
-      ps ax|grep -v grep|grep -q mysql
-      rs=$?
-      if [[ $rs == 1 ]] ; then
-      exit 0
-      fi
-      echo Stopping mysqld proccess. Please wait a little while..
-      sleep 5
-      let TIMER-=5
-      done
-      exit 1
-      EOH
-      action :nothing
-      notifies :start, "service[mysql]", :immediately
-    end
-    #############################################
   end
 end
