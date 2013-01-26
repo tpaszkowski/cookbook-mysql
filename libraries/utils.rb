@@ -6,6 +6,7 @@ module MG
     a_key = attrs["key"]
     a_var = attrs["var"]
     a_time = attrs["timeout"]
+    sttime = attrs["sttime"]
     until server.attribute?(attrib)&&server[attrib].key?(a_key)&&server[attrib][a_key]==a_var do
       if (Time.now.to_f-sttime)>=a_time
         Chef::Application.fatal! "Timeout exceeded while node #{server.name} syncing.."
