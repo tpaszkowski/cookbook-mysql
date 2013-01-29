@@ -22,7 +22,7 @@
 
 # Interface on this node to bind MySQL to. If not nil, this will override
 # the value that goes in node['mysql']['bind_address'].
-default['mysql']['bind_interface'] = nil
+default['mysql']['bind_address'] = node.ipaddress
 
 default['mysql']['version'] = '5.5.28'
 
@@ -45,6 +45,14 @@ else
   default['galera']['packages']['mysql_server']['x86_64'] = 'mysql-server-wsrep-5.5.28-23.7-amd64.deb'
   default['wsrep']['provider'] = "/usr/lib/galera/libgalera_smm.so"
 end
+
+# Define galera pid's
+default["galera"]["mysqld_pid"] = "/var/run/cluster_init.pid"
+default["galera"]["rsync_pid"] = "/var/lib/mysql//rsync_sst.pid"
+
+# Define timeouts
+default["galera"]["global_timer"] = 300
+default["galera"]["local_timer"] = 60
 
 # The name of the Chef role for servers involved in a Galera cluster
 # When writing the wsrep_urls, the recipe searches for nodes that
