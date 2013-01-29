@@ -52,7 +52,7 @@ default["galera"]["rsync_pid"] = "/var/lib/mysql//rsync_sst.pid"
 
 # Define timeouts
 default["galera"]["global_timer"] = 300
-default["galera"]["local_timer"] =⋅60
+default["galera"]["local_timer"] = 60
 
 # The name of the Chef role for servers involved in a Galera cluster
 # When writing the wsrep_urls, the recipe searches for nodes that

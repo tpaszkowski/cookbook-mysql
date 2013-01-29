@@ -117,15 +117,6 @@ else
 end
 is_reference_node = (reference_address == node["mysql"]["bind_address"])
 
-# Any MySQL server packages installed need to be removed, as
-# Galera is a specially-packaged MySQL server version that includes
-# the Galera WSREP plugin code compiled into the server.
-node['mysql']['server']['packages'].each do |package_name|
-  package package_name do
-    action :purge
-  end
-end
-
 # Install all support packages first
 packages = node['galera']['support_packages'].split(" ")
 packages.each do | pack |
