@@ -20,9 +20,8 @@
 # limitations under the License.
 #
 
-# Interface on this node to bind MySQL to. If not nil, this will override
-# the value that goes in node['mysql']['bind_address'].
-default['mysql']['bind_address'] = node.ipaddress
+# Interface on this node to bind MySQL to.
+default['mysql']['bind_interface'] = 'eth0'
 
 default['mysql']['version'] = '5.5.28'
 
