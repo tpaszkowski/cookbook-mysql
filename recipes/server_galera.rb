@@ -248,7 +248,6 @@ script "Check-sync-status" do
   done
   exit 1
   EOH
-  notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
   action :nothing
 end
 
@@ -260,7 +259,6 @@ ruby_block "Set-initial_replicate-state" do
     node.save
   end
   action :nothing
-  notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
 end
 
 # Search that all galera nodes finished first stage
@@ -350,6 +348,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
       action :run
       notifies :run, "script[Check-sync-status]", :immediately
+      notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
+      notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
     end
 
     # Check that all non-reference nodes are in operating condition
@@ -397,6 +397,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       EOH
       # After that start mysql service in normal mode
       notifies :start, "service[mysql]", :immediately
+      # Check that service succesfuly started
+      notifies :run, "script[Check-sync-status]", :immediately
       # Set flag that reference node is in operating condition
       notifies :create, "ruby_block[Cluster-ready]"
     end
@@ -423,6 +425,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       notifies :start, "service[mysql]", :immediately
       # Check that all non-reference nodes are synced with reference node
       notifies :run, "script[Check-sync-status]", :immediately
+      notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
+      notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
       # Set flag that non-reference node is in operating condition
       notifies :create, "ruby_block[Cluster-ready]"
     end
