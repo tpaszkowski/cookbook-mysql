@@ -52,6 +52,23 @@ else
   # SST authentication string. This will be used to send SST to joining nodes.
   # Depends on SST method. For mysqldump method it is wsrep_sst:<wsrep password>
   node.set['wsrep']['sst_auth'] = "#{node['wsrep']['user']}:#{node['wsrep']['password']}"
+  
+  # Note: actually this block need move to some initial recipe which will run at start any role on every node
+  # This block needs to make search role from node attributes
+  node.save
+  sttime=Time.now.to_f
+  allnodes = search(:node, "chef_environment:#{node.chef_environment}")
+  allnodes.each do |nd|
+    while nd["roles"].nil?||nd.key?("roles")&&nd["roles"].empty? do
+      if (Time.now.to_f-sttime)>=sttime
+        Chef::Application.fatal! "Timeout exceeded while roles syncing on node #{nd.name}.."
+      else
+        ::Chef::Log.info "Found that chef-client on node #{nd.name} was never launched or unsucceful ended. Please re-run chef-client or remove that node from curren chef_environment.."
+        sleep 10
+        nd = search(:node, "name:#{nd.name} AND chef_environment:#{node.chef_environment}")[0]
+      end
+    end
+  end
 
   galera_role = node["galera"]["chef_role"]
   galera_reference_role = node["galera"]["reference_node_chef_role"]
@@ -231,7 +248,6 @@ script "Check-sync-status" do
   done
   exit 1
   EOH
-  notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
   action :nothing
 end
 
@@ -243,7 +259,6 @@ ruby_block "Set-initial_replicate-state" do
     node.save
   end
   action :nothing
-  notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
 end
 
 # Search that all galera nodes finished first stage
@@ -333,6 +348,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       command %Q["#{node['mysql']['mysql_bin']}" -u root #{node['mysql']['server_root_password'].empty? ? '' : '-p' }"#{node['mysql']['server_root_password']}" -e "#{sql_command}"]
       action :run
       notifies :run, "script[Check-sync-status]", :immediately
+      notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
+      notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
     end
 
     # Check that all non-reference nodes are in operating condition
@@ -380,6 +397,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       EOH
       # After that start mysql service in normal mode
       notifies :start, "service[mysql]", :immediately
+      # Check that service succesfuly started
+      notifies :run, "script[Check-sync-status]", :immediately
       # Set flag that reference node is in operating condition
       notifies :create, "ruby_block[Cluster-ready]"
     end
@@ -406,6 +425,8 @@ unless node["galera"]["cluster_initial_replicate"] == "ok"
       notifies :start, "service[mysql]", :immediately
       # Check that all non-reference nodes are synced with reference node
       notifies :run, "script[Check-sync-status]", :immediately
+      notifies :create, "ruby_block[Set-initial_replicate-state]", :immediately
+      notifies :create, "ruby_block[Search-other-galera-mysql-servers]", :immediately
       # Set flag that non-reference node is in operating condition
       notifies :create, "ruby_block[Cluster-ready]"
     end
