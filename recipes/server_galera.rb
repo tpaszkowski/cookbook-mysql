@@ -202,6 +202,7 @@ service "mysql" do
   service_name node['mysql']['service_name']
   supports :status => true, :restart => true, :reload => true
   action :nothing
+  provider Chef::Provider::Service::Upstart
 end
 
 template "#{node['mysql']['conf_dir']}/my.cnf" do
