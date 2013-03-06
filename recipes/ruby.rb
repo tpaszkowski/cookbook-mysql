@@ -26,11 +26,15 @@ execute "apt-get update" do
 end.run_action(:run) if node['platform_family'] == "debian"
 
 node.set['build_essential']['compiletime'] = true
-include_recipe "build-essential"
 include_recipe "mysql::client"
 
 node['mysql']['client']['packages'].each do |mysql_pack|
   resources("package[#{mysql_pack}]").run_action(:install)
 end
 
-chef_gem "mysql"
+if node['platform'] == 'suse'
+  package "rubygem-mysql"
+else
+  include_recipe "build-essential"
+  chef_gem "mysql"
+end
