@@ -20,21 +20,20 @@
 # limitations under the License.
 #
 
-execute "apt-get update" do
-  ignore_failure true
-  action :nothing
-end.run_action(:run) if node['platform_family'] == "debian"
-
-node.set['build_essential']['compiletime'] = true
-include_recipe "mysql::client"
-
-node['mysql']['client']['packages'].each do |mysql_pack|
-  resources("package[#{mysql_pack}]").run_action(:install)
-end
-
 if node['platform'] == 'suse'
   package "rubygem-mysql"
 else
+  execute "apt-get update" do
+    ignore_failure true
+    action :nothing
+  end.run_action(:run) if node['platform_family'] == "debian"
+
+  node.set['build_essential']['compiletime'] = true
+  include_recipe "mysql::client"
+
+  node['mysql']['client']['packages'].each do |mysql_pack|
+    resources("package[#{mysql_pack}]").run_action(:install)
+  end
   include_recipe "build-essential"
   chef_gem "mysql"
 end
