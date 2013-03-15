@@ -90,9 +90,20 @@ if platform_family?('windows')
   end
 end
 
+# on openSUSE we need to execute systemctl  systemctl daemon-reload
+# to reread init script for mysql (fix send upstream, but recipie can
+# be called on systems without a fix
+execute "systemd-reload" do
+  command "systemctl daemon-reload"
+  only_if { node["lsb"]["description"][/^openSUSE/] }
+
+  action :nothing
+end
+
 node['mysql']['server']['packages'].each do |package_name|
   package package_name do
     action :install
+    notifies :run, "execute[systemd-reload]", :immediately
     notifies :start, "service[mysql]", :immediately
   end
 end
