@@ -95,7 +95,7 @@ end
 # be called on systems without a fix
 execute "systemd-reload" do
   command "systemctl daemon-reload"
-  only_if { node["lsb"]["description"][/^openSUSE/] }
+  only_if { !node["lsb"]["description"].nil? and node["lsb"]["description"][/^openSUSE/] }
 
   action :nothing
 end
