@@ -60,12 +60,13 @@ when "rhel", "fedora"
   # RHEL/CentOS mysql package does not support this option.
   default['mysql']['tunable']['innodb_adaptive_flushing'] = false
 when "suse"
-  if node["mysql"]["version"].to_f >= 5.5
-    default['mysql']['service_name']            = "mysql"
-    default['mysql']['pid_file']                    = "/var/run/mysql/mysql.pid"
+  default['mysql']['service_name']            = "mysql"
+  if node["platform_version"].to_f >= 12
+    default['mysql']['pid_file']                    = "/var/run/mysql/mysqld.pid"
+    default['mysql']['socket']                      = "/var/run/mysql/mysql.sock"
   else
-    default['mysql']['service_name']            = "mysqld"
-    default['mysql']['pid_file']                    = "/var/run/mysqld/mysqld.pid"
+    default['mysql']['pid_file']                    = "/var/lib/mysql/mysqld.pid"
+    default['mysql']['socket']                      = "/var/lib/mysql/mysql.sock"
   end
   default['mysql']['server']['packages']      = %w{mysql}
   default['mysql']['basedir']                 = "/usr"
@@ -76,7 +77,6 @@ when "suse"
 
   default['mysql']['conf_dir']                    = '/etc'
   default['mysql']['confd_dir']                   = '/etc/mysql/conf.d'
-  default['mysql']['socket']                      = "/var/lib/mysql/mysql.sock"
   default['mysql']['old_passwords']               = 1
   default['mysql']['grants_path']                 = "/etc/mysql_grants.sql"
   # RHEL/CentOS mysql package does not support this option.
