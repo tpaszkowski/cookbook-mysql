@@ -61,7 +61,7 @@ when "rhel", "fedora"
   default['mysql']['tunable']['innodb_adaptive_flushing'] = false
 when "suse"
   default['mysql']['service_name']            = "mysql"
-  if node["mysql"]["version"].to_f >= 5.5
+  if node["platform_version"].to_f >= 12
     default['mysql']['pid_file']                    = "/var/run/mysql/mysqld.pid"
     default['mysql']['socket']                      = "/var/run/mysql/mysql.sock"
   else
