@@ -64,9 +64,14 @@ when "suse"
   if node["platform_version"].to_f >= 12
     default['mysql']['pid_file']                    = "/var/run/mysql/mysqld.pid"
     default['mysql']['socket']                      = "/var/run/mysql/mysql.sock"
+    # openSUSE is running mysql >= 5.5
+    default["mysql"]["version"]                     = "5.5.0"
+    default['mysql']['tunable']['innodb_autoinc_lock_mode']        = "1"
   else
     default['mysql']['pid_file']                    = "/var/lib/mysql/mysqld.pid"
     default['mysql']['socket']                      = "/var/lib/mysql/mysql.sock"
+    # SLE11_SP2 is running mysql 5.0.x
+    default["mysql"]["version"]                     = "5.0.0"
   end
   default['mysql']['server']['packages']      = %w{mysql}
   default['mysql']['basedir']                 = "/usr"
@@ -218,7 +223,9 @@ default['mysql']['tunable']['innodb_write_io_threads']         = "4"
 default['mysql']['tunable']['innodb_io_capacity']              = "200"
 default['mysql']['tunable']['innodb_file_per_table']           = true
 default['mysql']['tunable']['innodb_lock_wait_timeout']        = "60"
-default['mysql']['tunable']['innodb_autoinc_lock_mode']        = "1"
+unless node["platform_family"] == "suse"
+  default['mysql']['tunable']['innodb_autoinc_lock_mode']        = "1"
+end
 default['mysql']['tunable']['innodb_locks_unsafe_for_binlog']  = "0"
 if node['cpu'].nil? or node['cpu']['total'].nil?
   default['mysql']['tunable']['innodb_thread_concurrency']       = "8"
@@ -256,7 +263,7 @@ default['mysql']['log_dir'] = node['mysql']['data_dir']
 default['mysql']['log_files_in_group'] = false
 default['mysql']['innodb_status_file'] = false
 
-unless node['platform_family'] && node['platform_version'].to_i < 6
+if node['platform_family'] == "rhel" && node['platform_version'].to_i >= 6
   # older RHEL platforms don't support these options
   default['mysql']['tunable']['event_scheduler']  = 0
   default['mysql']['tunable']['table_open_cache'] = "128"
